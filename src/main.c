@@ -44,7 +44,7 @@ void chip_init() {
   const uart_config_t uart_config = {
     .tx = pin_init("TX", INPUT_PULLUP),
     .rx = pin_init("RX", INPUT),
-    .baud_rate = 9600,
+    .baud_rate = 115200,
     .rx_data = on_uart_rx_data,
     .write_done = on_uart_write_done,
     .user_data = chip,
