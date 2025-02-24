@@ -26,8 +26,9 @@ static void on_uart_rx_data(void *user_data, uint8_t byte) {
   chip_state_t *chip = (chip_state_t*)user_data;
   // `byte` is the byte received on the "RX" pin
   printf("Incoming UART data: %d\n", byte);
-  String data_out = "TUPM-20-2829";
-  uart_write(chip->uart0, &data_out, sizeof(data_out));
+  const char *data_out = "TUPM-20-2829";
+
+  uart_write(chip->uart0, data_out, sizeof("TUPM-20-2829") - 1);
 }
 
 static uint8_t on_uart_write_done(void *user_data) {
