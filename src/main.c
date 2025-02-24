@@ -8,11 +8,13 @@
 #include "wokwi-api.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct {
   // TODO: Put your chip variables here
   pin_t inpin;
   uart_dev_t uart0;
+  uint32_t tupnum_attr;
 } chip_state_t;
 
 
@@ -20,8 +22,13 @@ void input_changed(void *user_data, pin_t pin, uint32_t value) {
   // value will either be HIGH or LOW
   chip_state_t* chip = (chip_state_t*)user_data;
   //ipasa mo ung TUPM code
-  const char *data_out = "TUPM-20-2829";
-  uart_write(chip->uart0, (uint8_t *)data_out, sizeof("TUPM-20-2829") - 1);
+  char buffer[20];
+  uint32_t randomNum = attr_read(chip->tupnum_attr);
+  sprintf(buffer, "TUPM-20-%d", randomNum);
+  // const char *data_out = "TUPM-20-" + randomNum;
+  uart_write(chip->uart0, (uint8_t *)buffer, strlen(buffer));
+
+
 }
 
 static void on_uart_rx_data(void *user_data, uint8_t byte);
@@ -33,6 +40,7 @@ void chip_init() {
 
   // pin_t inpin = pin_init("IN", INPUT_PULLDOWN);
   chip->inpin = pin_init("IN", INPUT_PULLDOWN);
+  chip->tupnum_attr = attr_init("randomNum", 2669);
 
   const pin_watch_config_t watch_input = {
     .edge = RISING,
@@ -60,8 +68,7 @@ void chip_init() {
 static void on_uart_rx_data(void *user_data, uint8_t byte) {
   chip_state_t *chip = (chip_state_t*)user_data;
   printf("Incoming UART data: %d\n", byte);
-  const char *data_out = "TUPM-20-2829";
-  uart_write(chip->uart0, (uint8_t *)data_out, sizeof("TUPM-20-2829") - 1);
+
 }
 
 static void on_uart_write_done(void *user_data) {
