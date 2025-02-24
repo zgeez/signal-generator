@@ -20,23 +20,12 @@ void input_changed(void *user_data, pin_t pin, uint32_t value) {
   // value will either be HIGH or LOW
   chip_state_t* chip = (chip_state_t*)user_data;
   //ipasa mo ung TUPM code
-}
-
-static void on_uart_rx_data(void *user_data, uint8_t byte) {
-  chip_state_t *chip = (chip_state_t*)user_data;
-  // `byte` is the byte received on the "RX" pin
-  printf("Incoming UART data: %d\n", byte);
   const char *data_out = "TUPM-20-2829";
-
-  uart_write(chip->uart0, data_out, sizeof("TUPM-20-2829") - 1);
+  uart_write(chip->uart0, (uint8_t *)data_out, sizeof("TUPM-20-2829") - 1);
 }
 
-static uint8_t on_uart_write_done(void *user_data) {
-  chip_state_t *chip = (chip_state_t*)user_data;
-  // You can write the chunk of data to transmit here (by calling uart_write).
-  printf("UART done\n");
-}
-
+static void on_uart_rx_data(void *user_data, uint8_t byte);
+static void on_uart_write_done(void *user_data);
 
 
 void chip_init() {
@@ -66,4 +55,16 @@ void chip_init() {
   // TODO: Initialize the chip, set up IO pins, create timers, etc.
 
   printf("Hello from custom chip!\n");
+}
+
+static void on_uart_rx_data(void *user_data, uint8_t byte) {
+  chip_state_t *chip = (chip_state_t*)user_data;
+  printf("Incoming UART data: %d\n", byte);
+  const char *data_out = "TUPM-20-2829";
+  uart_write(chip->uart0, (uint8_t *)data_out, sizeof("TUPM-20-2829") - 1);
+}
+
+static void on_uart_write_done(void *user_data) {
+  chip_state_t *chip = (chip_state_t*)user_data;
+  printf("UART done\n");
 }
