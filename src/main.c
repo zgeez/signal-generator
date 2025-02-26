@@ -1,28 +1,25 @@
 // Wokwi Custom SPI Chip Example
 //
-// This chip implements a simple ROT13 letter substitution cipher.
-// It receives a string over SPI, and returns the same string with
-// each alphabetic character replaced with its ROT13 substitution.
-//
 // For information and examples see:
 // https://link.wokwi.com/custom-chips-alpha
 //
 // SPDX-License-Identifier: MIT
-// Copyright (C) 2022 Uri Shaked / wokwi.com
-
-
-
-//need ko burahin ung rot13
-//gumawa ng lalagyan ng hexadecimal code
 
 #include "wokwi-api.h"
 #include <stdio.h>
 #include <stdlib.h>
 
+// Define the sequence of hexadecimal data to send
+static const uint8_t data_sequence[] = {0x4B, 0x59, 0x4C, 0x45, 0x20, 0x4B, 0x00};
+static const size_t data_length = sizeof(data_sequence) / sizeof(data_sequence[0]);
+
 typedef struct {
-  pin_t    cs_pin;
-  uint32_t spi;
-  uint8_t  spi_buffer[1];
+  pin_t    cs_pin;           // Chip Select pin
+  uint32_t spi;              // SPI device handle
+  uint8_t  spi_buffer[1];    // Buffer for SPI transactions
+  const uint8_t *data_sequence;  // Pointer to the data sequence
+  size_t   data_length;      // Length of the data sequence
+  size_t   current_index;    // Current position in the sequence
 } chip_state_t;
 
 static void chip_pin_change(void *user_data, pin_t pin, uint32_t value);
@@ -32,6 +29,9 @@ void chip_init(void) {
   chip_state_t *chip = malloc(sizeof(chip_state_t));
   
   chip->cs_pin = pin_init("CS", INPUT_PULLUP);
+  chip->data_sequence = data_sequence;  // Assign the sequence
+  chip->data_length = data_length;      // Set the sequence length
+  chip->current_index = 0;              // Start at the beginning
 
   const pin_watch_config_t watch_config = {
     .edge = BOTH,
@@ -50,18 +50,19 @@ void chip_init(void) {
   chip->spi = spi_init(&spi_config);
   
   printf("SPI Chip initialized!\n");
-
 }
-
 
 void chip_pin_change(void *user_data, pin_t pin, uint32_t value) {
   chip_state_t *chip = (chip_state_t*)user_data;
-  // Handle CS pin logic
   if (pin == chip->cs_pin) {
     if (value == LOW) {
       printf("SPI chip selected\n");
-      chip->spi_buffer[0] = ' '; // Some dummy data for the first character
-      spi_start(chip->spi, chip->spi_buffer, sizeof(chip->spi_buffer));
+      // Reset to the start of the sequence
+      chip->current_index = 0;
+      if (chip->current_index < chip->data_length) {
+        chip->spi_buffer[0] = chip->data_sequence[chip->current_index];
+        spi_start(chip->spi, chip->spi_buffer, sizeof(chip->spi_buffer));
+      }
     } else {
       printf("SPI chip deselected\n");
       spi_stop(chip->spi);
@@ -72,17 +73,21 @@ void chip_pin_change(void *user_data, pin_t pin, uint32_t value) {
 void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
   chip_state_t *chip = (chip_state_t*)user_data;
   if (!count) {
-    // This means that we got here from spi_stop, and no data was received
+    // spi_stop was called, no data transferred
     return;
   }
 
-  // Apply the ROT13 transformation, and store the result in the buffer.
-  // The result will be read back during the next SPI transfer.
-  //sending data happens here
-  buffer[0] = 0x4B;
-
-  if (pin_read(chip->cs_pin) == LOW) {
-    // Continue with the next character
-    spi_start(chip->spi, chip->spi_buffer, sizeof(chip->spi_buffer));
+  // Move to the next byte in the sequence
+  chip->current_index++;
+  if (chip->current_index < chip->data_length) {
+    // Update the buffer with the next byte
+    buffer[0] = chip->data_sequence[chip->current_index];
+    if (pin_read(chip->cs_pin) == LOW) {
+      // Continue sending the next byte
+      spi_start(chip->spi, chip->spi_buffer, sizeof(chip->spi_buffer));
+    }
+  } else {
+    // Sequence is complete
+    printf("Sequence complete\n");
   }
 }
