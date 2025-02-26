@@ -1,5 +1,4 @@
 // Wokwi Custom SPI Chip Example
-// Simulates an MFRC522 RFID reader responding to SPI commands
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2022 Uri Shaked / wokwi.com
 
@@ -17,8 +16,7 @@ typedef struct {
   uint8_t  spi_buffer[1];    // Buffer for SPI transactions (1 byte)
   const uint8_t *data_sequence;  // Pointer to the data sequence
   size_t   data_length;      // Length of the data sequence
-  bool     sending_uid;      // Flag indicating UID transmission
-  size_t   uid_index;        // Current position in the UID sequence
+  size_t   uid_index;        // Current position in the sequence
 } chip_state_t;
 
 static void chip_pin_change(void *user_data, pin_t pin, uint32_t value);
@@ -30,7 +28,6 @@ void chip_init(void) {
   chip->cs_pin = pin_init("CS", INPUT_PULLUP);
   chip->data_sequence = data_sequence;
   chip->data_length = data_length;
-  chip->sending_uid = false;
   chip->uid_index = 0;
 
   const pin_watch_config_t watch_config = {
@@ -44,6 +41,7 @@ void chip_init(void) {
     .sck = pin_init("SCK", INPUT),
     .miso = pin_init("MISO", INPUT),
     .mosi = pin_init("MOSI", INPUT),
+    .mode = 0,
     .done = chip_spi_done,
     .user_data = chip,
   };
@@ -57,15 +55,18 @@ void chip_pin_change(void *user_data, pin_t pin, uint32_t value) {
   if (pin == chip->cs_pin) {
     if (value == LOW) {
       printf("SPI chip selected\n");
-      // Start the first SPI transaction
-      chip->spi_buffer[0] = 0x00; // Default response
+      chip->uid_index = 0;
+      // Start the first SPI transaction with the first byte if available
+      if (chip->data_length > 0) {
+        chip->spi_buffer[0] = chip->data_sequence[0];
+      } else {
+        chip->spi_buffer[0] = 0x00; // Default if no data
+      }
       spi_start(chip->spi, chip->spi_buffer, sizeof(chip->spi_buffer));
     } else {
       printf("SPI chip deselected\n");
       spi_stop(chip->spi);
-      // Reset UID sending state when CS goes high
-      chip->sending_uid = false;
-      chip->uid_index = 0;
+      chip->uid_index = 0; // Reset index for next CS LOW
     }
   }
 }
@@ -73,28 +74,17 @@ void chip_pin_change(void *user_data, pin_t pin, uint32_t value) {
 void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
   chip_state_t *chip = (chip_state_t*)user_data;
   if (count == 1) {
-    uint8_t received_byte = buffer[0];
-    
-    // Check if the master is reading from FIFODataReg (address 0x09)
-    // Read command: (0x09 << 1) | 0x80 = 0x92
-    if (received_byte == 0x92) {
-      chip->sending_uid = true;
-      chip->uid_index = 0;
-    }
-    
-    // Prepare the next byte to send
-    if (chip->sending_uid && chip->uid_index < chip->data_length) {
+    // Increment index after the current byte has been sent
+    chip->uid_index++;
+    // Prepare the next byte
+    if (chip->uid_index < chip->data_length) {
       buffer[0] = chip->data_sequence[chip->uid_index];
-      chip->uid_index++;
     } else {
-      buffer[0] = 0x00; // Default response for other cases
+      buffer[0] = 0x00; // Send 0x00 when no more data
     }
-    
-    // If CS is still low, continue the SPI transaction
+    // Continue transaction if CS is still LOW
     if (pin_read(chip->cs_pin) == LOW) {
       spi_start(chip->spi, chip->spi_buffer, sizeof(chip->spi_buffer));
-    } else if (chip->sending_uid && chip->uid_index >= chip->data_length) {
-      printf("UID sequence complete\n");
     }
   }
 }
