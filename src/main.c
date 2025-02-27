@@ -64,13 +64,11 @@ static void chip_pin_change(void *user_data, pin_t pin, uint32_t value) {
   if (pin == chip->cs_pin) {
     if (value == LOW) {
       printf("SPI chip selected\n");
-      // Start SPI transaction with the next data
       chip->spi_buffer[0] = chip->next_data;
       spi_start(chip->spi, chip->spi_buffer, sizeof(chip->spi_buffer));
     } else {
       printf("SPI chip deselected\n");
       spi_stop(chip->spi);
-      // Reset reading flag and UID index when CS goes high
       chip->is_reading_fifo = false;
       chip->uid_index = 0;
     }
@@ -82,25 +80,28 @@ static void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
   chip_state_t *chip = (chip_state_t*)user_data;
   if (count == 1) {
     uint8_t received_byte = buffer[0];
-    printf("received byte: %d", received_byte);
+    printf("Received byte: 0x%02X\n", received_byte);
 
-    // Interpret the command byte
-    if (received_byte == 0x92) { // Read FIFODataReg (0x09): (0x09 << 1) | 0x80 = 0x92
+    // Handle MFRC522 read commands
+    if (received_byte == 0xEE) { // Read VersionReg (0x37): (0x37 << 1) | 0x80 = 0xEE
+      chip->next_data = 0x91; // Simulate v1.0
+      printf("Reading VersionReg, sending: 0x%02X\n", chip->next_data);
+    } else if (received_byte == 0x88) { // Read ComIrqReg (0x04): (0x04 << 1) | 0x80 = 0x88
+      chip->next_data = 0x20; // Simulate card detected (RxIRq bit set)
+      printf("Reading ComIrqReg, sending: 0x%02X\n", chip->next_data);
+    } else if (received_byte == 0x92) { // Read FIFODataReg (0x09): (0x09 << 1) | 0x80 = 0x92
       chip->is_reading_fifo = true;
-      chip->uid_index = 0; // Start sending UID from the beginning
-    } else if (received_byte == 0x88) { // Example: Read VersionReg (0x44): (0x44 << 1) | 0x80 = 0x88
-      chip->next_data = 0x1B; // MFRC522 version (example response)
-      printf("if byte 0x88, sending: %d\n", chip->next_data);
-    }
-
-    // Prepare the next byte to send
-    if (chip->is_reading_fifo && chip->uid_index < chip->uid_length) {
-      chip->next_data = chip->uid[chip->uid_index];
-      printf("if fifo true, sending: %d\n", chip->next_data);
-      chip->uid_index++;
-    } else if (received_byte != 0x88) {
-      chip->next_data = 0x00; // Default response for other commands
-      printf("if fifo not true, sending: %d\n", chip->next_data);
+      if (chip->uid_index < chip->uid_length) {
+        chip->next_data = chip->uid[chip->uid_index];
+        printf("Reading FIFODataReg, sending UID byte: 0x%02X\n", chip->next_data);
+        chip->uid_index++;
+      } else {
+        chip->next_data = 0x00;
+        printf("Reading FIFODataReg, no more UID data, sending: 0x00\n");
+      }
+    } else {
+      chip->next_data = 0x00; // Default response
+      printf("Unknown command, sending: 0x00\n");
     }
 
     // Update buffer for the next transaction
