@@ -6,13 +6,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Predefined UID to simulate an RFID tag (7 bytes)
-static const uint8_t uid[] = {0x4B, 0x59, 0x4C, 0x45, 0x20, 0x4B, 0x00};
+// Predefined UID to simulate an RFID tag (4 bytes for simplicity)
+static const uint8_t uid[] = {0x4B, 0x59, 0x4C, 0x45};
 static const size_t uid_length = sizeof(uid) / sizeof(uid[0]);
 
 // Simulated ATQA response for a MIFARE Classic 1K card
 static const uint8_t atqa[] = {0x04, 0x00};
 static const size_t atqa_length = sizeof(atqa) / sizeof(atqa[0]);
+
+// Simulated SAK response for a MIFARE Classic 1K card
+static const uint8_t sak = 0x08; // Indicates a completed 4-byte UID
 
 typedef struct {
   pin_t    cs_pin;          // Chip Select pin
@@ -26,6 +29,7 @@ typedef struct {
   size_t   atqa_index;      // Index of next ATQA byte to send
   uint8_t  next_data;       // Data to send in the next transaction
   bool     is_reading_fifo; // Flag to indicate if reading from FIFODataReg
+  bool     card_selected;   // Flag to indicate if a card has been selected
 } chip_state_t;
 
 // Function prototypes
@@ -45,6 +49,7 @@ void chip_init(void) {
   chip->atqa_index = 0;
   chip->next_data = 0x00;
   chip->is_reading_fifo = false;
+  chip->card_selected = false;
 
   // Watch CS pin for changes
   const pin_watch_config_t watch_config = {
@@ -82,6 +87,7 @@ static void chip_pin_change(void *user_data, pin_t pin, uint32_t value) {
       chip->is_reading_fifo = false;
       chip->uid_index = 0;
       chip->atqa_index = 0;
+      chip->card_selected = false; // Reset selection state
     }
   }
 }
@@ -102,21 +108,44 @@ static void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
       printf("Reading ComIrqReg, sending: 0x%02X\n", chip->next_data);
     } else if (received_byte == 0x92) { // Read FIFODataReg (0x09): (0x09 << 1) | 0x80 = 0x92
       chip->is_reading_fifo = true;
-      if (chip->atqa_index < chip->atqa_length) {
-        chip->next_data = chip->atqa[chip->atqa_index];
-        printf("Reading FIFODataReg, sending ATQA byte: 0x%02X\n", chip->next_data);
-        chip->atqa_index++;
-      } else if (chip->uid_index < chip->uid_length) {
-        chip->next_data = chip->uid[chip->uid_index];
-        printf("Reading FIFODataReg, sending UID byte: 0x%02X\n", chip->next_data);
-        chip->uid_index++;
+      if (!chip->card_selected) {
+        // Send ATQA for card detection
+        if (chip->atqa_index < chip->atqa_length) {
+          chip->next_data = chip->atqa[chip->atqa_index];
+          printf("Reading FIFODataReg, sending ATQA byte: 0x%02X\n", chip->next_data);
+          chip->atqa_index++;
+        } else {
+          chip->next_data = 0x00;
+          printf("Reading FIFODataReg, no more ATQA data, sending: 0x00\n");
+        }
       } else {
-        chip->next_data = 0x00;
-        printf("Reading FIFODataReg, no more data, sending: 0x00\n");
+        // Send UID and SAK after selection
+        if (chip->uid_index < chip->uid_length) {
+          chip->next_data = chip->uid[chip->uid_index];
+          printf("Reading FIFODataReg, sending UID byte: 0x%02X\n", chip->next_data);
+          chip->uid_index++;
+        } else if (chip->uid_index == chip->uid_length) {
+          chip->next_data = sak; // Send SAK
+          printf("Reading FIFODataReg, sending SAK: 0x%02X\n", chip->next_data);
+          chip->uid_index++;
+        } else {
+          chip->next_data = 0x00;
+          printf("Reading FIFODataReg, no more data, sending: 0x00\n");
+        }
       }
     } else if ((received_byte & 0x80) == 0) { // Write command: ((reg << 1) & 0x7E)
       uint8_t reg_address = (received_byte >> 1) & 0x3F;
       printf("Write to register 0x%02X\n", reg_address);
+      // Simulate card selection when CommandReg (0x01) is written with PICC_CMD_SEL_CL1 (0x93)
+      if (reg_address == 0x01) { // CommandReg
+        // Wait for the next byte to determine the command
+        spi_start(chip->spi, chip->spi_buffer, sizeof(chip->spi_buffer)); // Trigger next transaction
+        uint8_t next_received_byte = buffer[0]; // Note: This assumes the next byte is queued
+        if (next_received_byte == 0x93) { // PICC_CMD_SEL_CL1
+          chip->card_selected = true;
+          printf("Card selected with command 0x93\n");
+        }
+      }
       chip->next_data = 0x00; // Acknowledge write, no data to return
     } else {
       chip->next_data = 0x00; // Default response for unrecognized commands
