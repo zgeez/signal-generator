@@ -7,17 +7,18 @@
 #include <stdlib.h>
 
 // Predefined UID to simulate an RFID tag (7 bytes)
-static const uint8_t data_sequence[] = {0x4B, 0x59, 0x4C, 0x45, 0x20, 0x4B, 0x00};
-static const size_t data_length = sizeof(data_sequence) / sizeof(data_sequence[0]);
+static const uint8_t uid[] = {0x4B, 0x59, 0x4C, 0x45, 0x20, 0x4B, 0x00};
+static const size_t uid_length = sizeof(uid) / sizeof(uid[0]);
 
 typedef struct {
-  pin_t    cs_pin;           // Chip Select pin
-  uint32_t spi;              // SPI device handle
-  uint8_t  spi_buffer[1];    // SPI buffer for 1-byte transactions
-  const uint8_t *data_sequence; // Pointer to UID sequence
-  size_t   data_length;      // Length of UID sequence
-  size_t   uid_index;        // Index of next UID byte to send
-  uint8_t  next_data;        // Data to send in the next transaction
+  pin_t    cs_pin;          // Chip Select pin
+  uint32_t spi;             // SPI device handle
+  uint8_t  spi_buffer[1];   // SPI buffer for 1-byte transactions
+  const uint8_t *uid;       // Pointer to UID sequence
+  size_t   uid_length;      // Length of UID sequence
+  size_t   uid_index;       // Index of next UID byte to send
+  uint8_t  next_data;       // Data to send in the next transaction
+  bool     is_reading_fifo; // Flag to indicate if reading from FIFODataReg
 } chip_state_t;
 
 // Function prototypes
@@ -29,10 +30,11 @@ void chip_init(void) {
   chip_state_t *chip = malloc(sizeof(chip_state_t));
   
   chip->cs_pin = pin_init("CS", INPUT_PULLUP);
-  chip->data_sequence = data_sequence;
-  chip->data_length = data_length;
+  chip->uid = uid;
+  chip->uid_length = uid_length;
   chip->uid_index = 0;
   chip->next_data = 0x00;
+  chip->is_reading_fifo = false;
 
   // Watch CS pin for changes
   const pin_watch_config_t watch_config = {
@@ -45,7 +47,7 @@ void chip_init(void) {
   // Initialize SPI
   const spi_config_t spi_config = {
     .sck = pin_init("SCK", INPUT),
-    .miso = pin_init("MISO", INPUT),
+    .miso = pin_init("MISO", OUTPUT),
     .mosi = pin_init("MOSI", INPUT),
     .mode = 0,
     .done = chip_spi_done,
@@ -68,8 +70,9 @@ static void chip_pin_change(void *user_data, pin_t pin, uint32_t value) {
     } else {
       printf("SPI chip deselected\n");
       spi_stop(chip->spi);
-      // Uncomment the next line to reset UID sequence when CS goes high
-      // chip->uid_index = 0;
+      // Reset reading flag and UID index when CS goes high
+      chip->is_reading_fifo = false;
+      chip->uid_index = 0;
     }
   }
 }
@@ -80,20 +83,29 @@ static void chip_spi_done(void *user_data, uint8_t *buffer, uint32_t count) {
   if (count == 1) {
     uint8_t received_byte = buffer[0];
     printf("received byte: %d", received_byte);
-    
-    // Decide what to send next based on received byte
-    if (received_byte == 0x92 && chip->uid_index < chip->data_length) {
-      // Master is reading FIFODataReg; send next UID byte in the next transaction
-      chip->next_data = chip->data_sequence[chip->uid_index];
-      chip->uid_index++;
-    } else {
-      // Default response for other commands or after UID is sent
-      chip->next_data = 0x00;
+
+    // Interpret the command byte
+    if (received_byte == 0x92) { // Read FIFODataReg (0x09): (0x09 << 1) | 0x80 = 0x92
+      chip->is_reading_fifo = true;
+      chip->uid_index = 0; // Start sending UID from the beginning
+    } else if (received_byte == 0x88) { // Example: Read VersionReg (0x44): (0x44 << 1) | 0x80 = 0x88
+      chip->next_data = 0x1B; // MFRC522 version (example response)
+      printf("if byte 0x88, sending: %d\n", chip->next_data);
     }
-    
-    // Prepare buffer for the next transaction
+
+    // Prepare the next byte to send
+    if (chip->is_reading_fifo && chip->uid_index < chip->uid_length) {
+      chip->next_data = chip->uid[chip->uid_index];
+      printf("if fifo true, sending: %d\n", chip->next_data);
+      chip->uid_index++;
+    } else if (received_byte != 0x88) {
+      chip->next_data = 0x00; // Default response for other commands
+      printf("if fifo not true, sending: %d\n", chip->next_data);
+    }
+
+    // Update buffer for the next transaction
     buffer[0] = chip->next_data;
-    
+
     // Continue SPI transaction if CS is still low
     if (pin_read(chip->cs_pin) == LOW) {
       spi_start(chip->spi, chip->spi_buffer, sizeof(chip->spi_buffer));
