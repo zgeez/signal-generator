@@ -1,0 +1,54 @@
+{
+    "name": "Signal Generator",
+    "author": "Ziad Ghanem",
+    "pins": [
+      "",
+      "",
+      "",
+      "",
+      "OUT",
+      ""
+    ],
+    "controls": [
+      {
+        "id": "amplitude",
+        "label": "Voltage Amplitude",
+        "type": "range",
+        "min": 0,
+        "max": 5,
+        "step": 0.1
+      },
+      {
+        "id": "offset",
+        "label": "Voltage Offset",
+        "type": "range",
+        "min": 0,
+        "max": 5,
+        "step": 0.1
+      },
+      {
+        "id": "frequency",
+        "label": "Frequency",
+        "type": "range",
+        "min": 0,
+        "max": 10,
+        "step": 0.1
+      },
+      {
+        "id": "frequency_exp",
+        "label": "Frequency Scale ( 10^Y Hz)",
+        "type": "range",
+        "min": -2,
+        "max": 2,
+        "step": 1
+      },
+          {
+        "id": "delay",
+        "label": "delay (º)",
+        "type": "range",
+        "min": -180,
+        "max": 180,
+        "step": 1
+      }
+    ]
+  }
