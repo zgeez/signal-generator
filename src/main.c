@@ -53,4 +53,3 @@ void chip_timer_event(void *user_data) {
   
   pin_dac_write(chip->pin_out, voltage);
 }
-
